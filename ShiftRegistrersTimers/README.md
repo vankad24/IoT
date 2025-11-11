@@ -143,7 +143,7 @@ const uint8_t DATA_PIN_MASK   = (1 << PD7); // DS (Data)
 
 ## Ссылки
 
-* **[Видео-демонстрация работы]()**
+* **[Видео-демонстрация работы](https://disk.yandex.ru/i/Cptrpix3OekIeQ)**
 * **[Tinkercad-схема подключения](https://www.tinkercad.com/things/0KRMY5Hgg6q-shiftregistrerstimers?sharecode=YKD9drDm3wNgmbYrd1Czht3_FJphJZ9VvXdJqC8XHMw)**
 
 ---
