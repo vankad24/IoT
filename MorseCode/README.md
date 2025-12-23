@@ -304,5 +304,5 @@ ELEMENT_PAUSE_TU < LETTER_PAUSE_TU < WORD_PAUSE_TU
 
 ## Ссылки
 
-* **[Видео-демонстрация работы]()**
+* **[Видео-демонстрация работы](https://disk.yandex.ru/i/gR8F0R9S0r_Dbg)**
 * **[Tinkercad-схема подключения](https://www.tinkercad.com/things/7JcgediYPwC-morsecode?sharecode=QHoknt5JgFA99c_mac4HU8cTO0DhXg_a1LF5GdQfdsU)**
