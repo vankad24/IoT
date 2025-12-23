@@ -235,7 +235,7 @@ Sensor → GPIO → Морзе → ASCII
 * Morse → ASCII
 * ASCII → 7-segment
 
-**генерируются автоматически** с помощью [Python-скрипта](/gen_morse_code_maps.py):
+**генерируются автоматически** с помощью [Python-скрипта](/MorseCode/gen_morse_code_maps.py):
 
 Преимущества подхода:
 
