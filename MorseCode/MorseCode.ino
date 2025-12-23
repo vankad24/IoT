@@ -564,7 +564,10 @@ void timerInterrupt() {
 
 void sensorInterrupt(){
     if (mode==ROW || mode == NORMAL){
-        digitalWrite(MORSE_CODE_TX_PIN, digitalRead(SENSOR_PIN));
+        bool level = !digitalRead(SENSOR_PIN);
+        digitalWrite(MORSE_CODE_TX_PIN, level);
+        Serial.print("sensor ");
+        Serial.println(level);
     }
 }
 
