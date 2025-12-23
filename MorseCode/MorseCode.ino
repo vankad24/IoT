@@ -245,9 +245,9 @@ public:
 };
 // ----------- pins -----------
 
+const uint8_t SENSOR_PIN = 2;
 const uint8_t MORSE_CODE_RX_PIN = 3; // interrupt pin
 const uint8_t MORSE_CODE_TX_PIN = 4;
-const uint8_t SENSOR_PIN = 5;
 
 // Пины для управления 74HC595
 const uint8_t CLOCK_PIN = 6; //SH_CP
@@ -300,6 +300,7 @@ const float WORD_PAUSE_RIGHT_LIMIT = (float)TIMEOUT_TU;
 // ----------- variables -----------
 volatile uint64_t current_millis = 0;
 volatile uint64_t last_change = 0;
+volatile uint64_t last_stable_change_time = 0;
 volatile uint64_t rx_timeout_time = 0;
 volatile uint64_t tx_timeout_time = 0;
 volatile uint64_t no_debounce_accept_time = 0;
@@ -318,13 +319,12 @@ volatile Buffer rx_buffer(RX_BUFFER_SIZE);
 volatile Buffer tx_buffer(TX_BUFFER_SIZE);
 
 // ----------- loop variables -----------
-MODE_STATES mode = SER;
-MODE_STATES prev_mode = SER;
+volatile MODE_STATES mode = SER;
+volatile MODE_STATES prev_mode = SER;
 uint64_t next_char_display_time = 0;
 char cur_char = 0;
 
-
-
+volatile uint64_t last_debug = 0;
 
 
 // ----------- Функции для получения данных из "словарей" -----------
@@ -382,10 +382,25 @@ void saveSym(char c){
 }
 
 void readSignal(){
-    float delta_tu = (float)(current_millis - last_change)/TIME_UNIT_MS;
-    rx_timeout_time = current_millis + TIME_UNIT_MS * TIMEOUT_TU;
-    
+    float delta_tu = (float)(last_change - last_stable_change_time) / TIME_UNIT_MS;
+
+
     if (rx_signal_value){
+        //from HIGH to LOW
+        
+        if (delta_tu < DOT_LEFT_LIMIT){
+            // дребезг
+        }else if (DOT_LEFT_LIMIT <= delta_tu && delta_tu < DOT_RIGHT_LIMIT){
+            //DOT_TU action
+            addBitToCode(0);
+        }else if (DOT_RIGHT_LIMIT <= delta_tu && delta_tu < DASH_RIGHT_LIMIT){
+            //DASH_TU action
+            addBitToCode(1);
+        }else {
+            // TIMEOUT
+        }
+
+    }else{
         //from LOW to HIGH
         if (delta_tu < ELEMENT_PAUSE_LEFT_LIMIT) {
             // дребезг
@@ -396,23 +411,9 @@ void readSignal(){
             saveSym(codeToSym(rx_code));
         } else if (LETTER_PAUSE_RIGHT_LIMIT <= delta_tu && delta_tu < WORD_PAUSE_RIGHT_LIMIT) {
             // WORD_PAUSE action
+            saveSym(codeToSym(rx_code));
             saveSym(' ');
         } else {
-            // TIMEOUT
-        }
-
-    }else{
-        //from HIGH to LOW
-        
-        if (delta_tu < DOT_LEFT_LIMIT){
-            // дребезг
-        }else if (DOT_LEFT_LIMIT >= delta_tu && delta_tu < DOT_RIGHT_LIMIT){
-            //DOT_TU action
-            addBitToCode(0);
-        }else if (DOT_RIGHT_LIMIT >= delta_tu && delta_tu < DASH_RIGHT_LIMIT){
-            //DASH_TU action
-            addBitToCode(1);
-        }else {
             // TIMEOUT
         }
         
@@ -423,6 +424,7 @@ void readSignal(){
 // ----------- Функции отправки морзе -----------
 
 void sendSignal() {
+    
     switch (tx_next_state) {
         case WAIT_LETTER:
             // В простое проверяем буфер
@@ -463,9 +465,10 @@ void sendSignal() {
                     }else sendSignal();// Сразу переходим к отправке первого бита буквы (Рекурсивный вызов без ожидания)
                 }
             } else {
-                // Буфер пуст, убеждаемся, что пин LOW
-                digitalWrite(MORSE_CODE_TX_PIN, LOW);
-                tx_signal_value = false;
+                // Буфер пуст, ожидаем в HIGH
+                digitalWrite(MORSE_CODE_TX_PIN, HIGH);
+                tx_signal_value = true;
+                
             }
             break;
 
@@ -481,9 +484,6 @@ void sendSignal() {
             break;
 
         case PAUSE:
-            // записываем через сколько будет timeout, если бездействовать
-            tx_timeout_time = current_millis + (uint64_t) TIMEOUT_TU * TIME_UNIT_MS;
-
             // Определяем тип паузы
             if (shift_tx_code > 0) {
                 // ELEMENT_PAUSE - пауза после точки или тире
@@ -515,38 +515,57 @@ void changeTxSignal(uint8_t duration, bool signal_value){
 // ----------- Вызовы прерываний -----------
 
 void pinInterrupt() {
-    // чтение
-    if (!debounce_checking){
-        saved_signal_value = rx_signal_value;
-        last_change = current_millis;
-    }
-    debounce_checking = true;
-
-    rx_signal_value = !rx_signal_value;
-    
-    no_debounce_accept_time = current_millis+DEBOUNCE_MAX_LIMIT_MS;
+    // Просто фиксируем, что что-то изменилось
+    // и запоминаем время последнего
+    last_change = current_millis;
 }
 
 void timerInterrupt() {
-    // чтение
-    if (is_reading_status){
-        if (current_millis>=rx_timeout_time){
-            // TIMEOUT
-            is_reading_status = false;
-            saveSym(codeToSym(rx_code));
-        }
+    // 1. Обработка дебаунса и смены состояний
+    // Если сигнал стабилен больше DEBOUNCE_MAX_LIMIT_MS и мы еще не обработали это
+    bool actual_pin_state = digitalRead(MORSE_CODE_RX_PIN);
+    
+    // Если состояние пина не совпадает с логическим rx_signal_value и дребезг прошел
+    if (actual_pin_state != rx_signal_value && (current_millis - last_change) >= DEBOUNCE_MAX_LIMIT_MS) {
+        
+        // ВАЖНО: Мы замеряем длительность ПРЕДЫДУЩЕГО состояния
+        // Которое длилось с момента ПРОШЛОЙ стабильной смены до СЕЙЧАС (точнее до last_change)
+        
+        // Обрабатываем завершенное состояние (rx_signal_value — это то, что БЫЛО)
+        
+        readSignal();
+        
+        // Обновляем состояние
+        rx_signal_value = actual_pin_state;
+        last_stable_change_time = last_change;
+        
+        // Сбрасываем таймаут
+        rx_timeout_time = current_millis + (uint32_t)TIMEOUT_TU * TIME_UNIT_MS;
+        is_reading_status = true;
     }
 
-    if (debounce_checking && current_millis>=no_debounce_accept_time){
-        debounce_checking = false;
-        if (rx_signal_value!=saved_signal_value){
-            is_reading_status = true;
-            readSignal();
+    // 2. Обработка таймаута (если долго нет изменений)
+    if (is_reading_status && current_millis >= rx_timeout_time) {
+        is_reading_status = false;
+        if (rx_code > 1) { // Если в коде что-то есть
+            saveSym(codeToSym(rx_code));
         }
     }
 
     // отправка
     if (current_millis >= next_tx_change_time) sendSignal();
+
+    if (last_tx_state!=tx_signal_value){
+        last_tx_state = tx_signal_value;
+        tx_timeout_time = current_millis + (uint64_t) TIMEOUT_TU * TIME_UNIT_MS;
+    }
+}
+
+
+void sensorInterrupt(){
+    if (mode==ROW || mode == NORMAL){
+        digitalWrite(MORSE_CODE_TX_PIN, digitalRead(SENSOR_PIN));
+    }
 }
 
 // -------- segments --------
@@ -600,6 +619,7 @@ void setupInterrupts() {
 
   // Прерывания по пину
   attachInterrupt(digitalPinToInterrupt(MORSE_CODE_RX_PIN), pinInterrupt, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(SENSOR_PIN), sensorInterrupt, CHANGE);
 }
 
 
@@ -617,6 +637,10 @@ void setup(){
     // Настройка пинов с подтягивающим резистором для избегания помех
     pinMode(MORSE_CODE_RX_PIN, INPUT_PULLUP);
     pinMode(SENSOR_PIN, INPUT_PULLUP);
+    
+    // Пин передачи
+    pinMode(MORSE_CODE_TX_PIN, OUTPUT);
+
     // Пины для управления 74HC595
     pinMode(LATCH_PIN, OUTPUT);
     pinMode(DATA_PIN, OUTPUT);
@@ -625,7 +649,7 @@ void setup(){
     setupInterrupts();
 
 
-    rx_buffer.write('A');
+    /*rx_buffer.write('A');
     rx_buffer.write('B');
     rx_buffer.write('C');
 
@@ -633,7 +657,9 @@ void setup(){
       while (morseAvailable()) {
         Serial.print("Available read ");
         Serial.println(morseRead());
-      }
+      }*/
+
+    Serial.println("Started");
 }
 
 void loop() {
@@ -681,9 +707,6 @@ void loop() {
               break;
             case SER:
               // serial logic
-                // if (cur_char){
-                //     showSymbol(cur_char);
-                // }
                 if (morseWriteAvailable()){
                     morseWrite(cur_char);
                     cur_char = 0;
@@ -700,8 +723,8 @@ void loop() {
     if (next_char_display_time <= cur_millis && morseAvailable()){
         char sym = morseRead();
         showSymbol(sym);
-        Serial.print("Recieved char: ");
-        Serial.println(sym);
+        // Serial.print("Recieved char: ");
+        Serial.print(sym);
         next_char_display_time = cur_millis + CHAR_DISPLAY_TIME_MS;
     }
 }
