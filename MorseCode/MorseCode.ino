@@ -311,6 +311,7 @@ volatile uint8_t last_pause_tu = 1;
 volatile int8_t shift_tx_code = -1;
 volatile bool rx_signal_value = true;
 volatile bool tx_signal_value = true;
+volatile bool last_tx_state = true;
 volatile bool is_reading_status = false;
 volatile bool debounce_checking = false;
 volatile bool saved_signal_value = false;
